@@ -4,6 +4,35 @@
 
 Imagine you are a sales manager at Contoso, a multinational retail company that sells outdoor equipment. You need to analyze sales data to find trends, understand customer preferences, and make informed business decisions. To help you, Contoso has developed a conversational agent that can answer questions about your sales data.
 
+## Quick Start - Running the UI App
+
+### 1. Verify Setup
+```bash
+cd src/workshop
+python check_setup.py
+```
+
+### 2. Configure Environment
+If setup check fails, create and configure your `.env` file:
+```bash
+cp .env.example .env
+# Edit .env with your Azure AI Foundry credentials
+```
+
+### 3. Run the Application
+```bash
+python ui_app.py
+```
+
+Then open http://localhost:5000 in your browser.
+
+### 4. Debug Mode (VS Code)
+Use the debug configuration "Python Debugger: UI App" from the Run and Debug panel (F5).
+
+For detailed instructions, see [DEBUG_GUIDE.md](DEBUG_GUIDE.md).
+
+---
+
 ## What is an LLM-Powered AI Agent
 
 An AI Agent is semi-autonomous software designed to achieve a given goal without requiring predefined steps or processes. Instead of following explicitly programmed instructions, the agent determines how to accomplish the task dynamically.

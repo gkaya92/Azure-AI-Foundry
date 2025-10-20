@@ -1,13 +1,39 @@
 import asyncio
 import threading
 import os
+import sys
 from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
 
+# Load environment variables first
+load_dotenv()
+
+# Check for required environment variables before importing main
+required_env_vars = [
+    "PROJECT_ENDPOINT",
+    "AZURE_SUBSCRIPTION_ID",
+    "AZURE_RESOURCE_GROUP_NAME",
+    "AZURE_PROJECT_NAME"
+]
+
+missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
+
+if missing_vars:
+    print("\n" + "="*70)
+    print("ERROR: Missing required environment variables!")
+    print("="*70)
+    print("\nThe following environment variables are not set:")
+    for var in missing_vars:
+        print(f"  - {var}")
+    print("\nPlease create a .env file in src/workshop/ with these variables.")
+    print("You can use .env.example as a template:")
+    print("  cp .env.example .env")
+    print("\nFor detailed setup instructions, see DEBUG_GUIDE.md")
+    print("="*70 + "\n")
+    sys.exit(1)
+
 # Import utilities from the existing project
 from main import initialize, post_message, cleanup, project_client
-
-load_dotenv()
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 

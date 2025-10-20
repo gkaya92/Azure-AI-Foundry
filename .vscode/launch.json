@@ -10,6 +10,32 @@
             "request": "launch",
             "program": "src/workshop/main.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Python Debugger: UI App",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/workshop/ui_app.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/src/workshop",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src/workshop"
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "Python Debugger: UI App (Debug Mode)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/workshop/ui_app.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/src/workshop",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src/workshop",
+                "FLASK_ENV": "development",
+                "FLASK_DEBUG": "1"
+            },
+            "justMyCode": false
         }
     ]
 }
