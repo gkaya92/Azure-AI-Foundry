@@ -37,7 +37,6 @@ MAX_PROMPT_TOKENS = 10240
 TEMPERATURE = 0.1
 TOP_P = 0.1
 
-toolset = AsyncToolSet()
 sales_data = SalesData()
 utilities = Utilities()
 
@@ -70,41 +69,40 @@ except Exception as e:
     )
     print("Using fallback client configuration")
 
-functions = AsyncFunctionTool(
-    {
-        sales_data.async_fetch_sales_data_using_sqlite_query,
-    }
-)
 
-# INSTRUCTIONS_FILE = "instructions/instructions_function_calling.txt"
-# INSTRUCTIONS_FILE = "instructions/instructions_code_interpreter.txt"
-# INSTRUCTIONS_FILE = "instructions/instructions_file_search.txt"
+INSTRUCTIONS_FILE = "instructions/instructions_function_calling.txt"
+INSTRUCTIONS_FILE = "instructions/instructions_code_interpreter.txt"
+INSTRUCTIONS_FILE = "instructions/instructions_file_search.txt"
 
 
 async def add_agent_tools():
-    """Add tools for the agent."""
+    """Create and return a fresh AsyncToolSet for the agent."""
+    toolset = AsyncToolSet()
 
-    # Add the functions tool
-    # toolset.add(functions)
+    # Create the functions tool for this toolset
+    functions = AsyncFunctionTool({sales_data.async_fetch_sales_data_using_sqlite_query})
+    toolset.add(functions)
 
-    # # Add the code interpreter tool
-    # code_interpreter = CodeInterpreterTool()
-    # toolset.add(code_interpreter)
+    # Add the code interpreter tool
+    code_interpreter = CodeInterpreterTool()
+    toolset.add(code_interpreter)
 
-    # # Add file search tool - uncomment to enable file search capability
-    # print("Creating vector store for file search...")
-    # try:
-    #     vector_store = utilities.create_vector_store(
-    #         project_client,
-    #         files=[TENTS_DATA_SHEET_FILE],
-    #         vector_name_name="Contoso Product Information Vector Store",
-    #     )
-    #     file_search_tool = FileSearchTool(vector_store_ids=[vector_store.id])
-    #     toolset.add(file_search_tool)
-    #     print(f"File search tool added with vector store: {vector_store.id}")
-    # except Exception as e:
-    #     print(f"Error creating file search tool: {e}")
-    #     print("Continuing without file search capability...")
+    # Add file search tool if available
+    print("Creating vector store for file search...")
+    try:
+        vector_store = utilities.create_vector_store(
+            project_client,
+            files=[TENTS_DATA_SHEET_FILE],
+            vector_name_name="Contoso Product Information Vector Store",
+        )
+        file_search_tool = FileSearchTool(vector_store_ids=[vector_store.id])
+        toolset.add(file_search_tool)
+        print(f"File search tool added with vector store: {vector_store.id}")
+    except Exception as e:
+        print(f"Error creating file search tool: {e}")
+        print("Continuing without file search capability...")
+
+    return toolset
 
 
 async def initialize() -> tuple[Agent, AgentThread]:
@@ -118,7 +116,7 @@ async def initialize() -> tuple[Agent, AgentThread]:
     try:
         env = os.getenv("ENVIRONMENT", "local")
         INSTRUCTIONS_FILE_PATH = f"{'src/workshop/' if env == 'container' else ''}{INSTRUCTIONS_FILE}"
-        
+
         with open(INSTRUCTIONS_FILE_PATH, "r", encoding="utf-8", errors="ignore") as file:
             instructions = file.read()
 
@@ -126,8 +124,8 @@ async def initialize() -> tuple[Agent, AgentThread]:
         instructions = instructions.replace("{database_schema_string}", database_schema_string)
         instructions = instructions.replace("{current_date}", date.today().strftime("%Y-%m-%d"))
 
-        # Add agent tools (this must be done inside the context manager)
-        await add_agent_tools()
+        # Add agent tools (create a fresh toolset per initialize call)
+        toolset = await add_agent_tools()
 
         # Create agent and thread without closing the context manager
         print("Creating agent...")
@@ -170,21 +168,47 @@ async def post_message(thread_id: str, content: str, agent: Agent, thread: Agent
     try:
         print(f"Creating message in thread {thread_id}...")
         
-        # Create message using project_client directly
-        message = project_client.agents.messages.create(
-            thread_id=thread_id,
-            role="user",
-            content=content,
-        )
-        print(f"Message created: {message.id}")
+        # Create message using project_client directly with retries
+        max_attempts = 3
+        attempt = 0
+        message = None
+        while attempt < max_attempts:
+            attempt += 1
+            try:
+                message = project_client.agents.messages.create(
+                    thread_id=thread_id,
+                    role="user",
+                    content=content,
+                )
+                print(f"Message created: {getattr(message, 'id', '<no-id>')}")
+                break
+            except Exception as e:
+                print(f"Error creating message (attempt {attempt}/{max_attempts}): {e}")
+                # On final attempt, re-raise to be handled below
+                if attempt >= max_attempts:
+                    raise
+                import time as _time
+                _time.sleep(2 * attempt)
 
         print(f"Creating run for agent {agent.id}...")
-        # Create and poll run
-        run = project_client.agents.runs.create(
-            thread_id=thread.id,
-            agent_id=agent.id,
-        )
-        print(f"Run created: {run.id}")
+        # Create and poll run (with retries)
+        run = None
+        attempt = 0
+        while attempt < max_attempts:
+            attempt += 1
+            try:
+                run = project_client.agents.runs.create(
+                    thread_id=thread.id,
+                    agent_id=agent.id,
+                )
+                print(f"Run created: {getattr(run, 'id', '<no-id>')}")
+                break
+            except Exception as e:
+                print(f"Error creating run (attempt {attempt}/{max_attempts}): {e}")
+                if attempt >= max_attempts:
+                    raise
+                import time as _time
+                _time.sleep(2 * attempt)
         
         # Enhanced polling with action handling
         import time
@@ -237,38 +261,75 @@ async def post_message(thread_id: str, content: str, agent: Agent, thread: Agent
         
         if iteration >= max_iterations:
             print("Run timed out after maximum iterations")
-            return
+            return "(timed out)"
             
         print(f"Run finished with status: {run.status}")
         
+        # Log run summary for debugging
+        try:
+            print(f"Run summary: id={getattr(run, 'id', '<no-id>')} status={getattr(run, 'status', '<no-status>')}")
+            print(f"Run last_error: {getattr(run, 'last_error', None)}")
+            print(f"Run required_action: {getattr(run, 'required_action', None)}")
+        except Exception:
+            pass
+
         if run.status == "failed":
-            print(f"Run failed: {run.last_error}")
+            print(f"Run failed: {getattr(run, 'last_error', '<no-error>')}")
+            return f"(run failed: {getattr(run, 'last_error', '<no-error>')})"
         elif run.status == "completed":
-            # Get the last message from the agent
+            # Get the last message from the agent and return it
             try:
                 response = project_client.agents.messages.get_last_message_by_role(
                     thread_id=thread_id,
                     role=MessageRole.AGENT,
                 )
-                if response:
+                if response and getattr(response, 'text_messages', None):
+                    response_text = "\n".join(t.text.value for t in response.text_messages)
                     print("\nAgent response:")
-                    print("\n".join(t.text.value for t in response.text_messages))
+                    print(response_text)
                 else:
+                    response_text = "(no response)"
                     print("No response message found")
-                
+
                 # Handle file downloads from code interpreter
                 try:
                     utilities.download_agent_files(project_client, thread_id)
                 except Exception as e:
                     print(f"Error handling file downloads: {e}")
-                    
+
+                # Convert markdown/plain text to HTML for consistent UI rendering
+                try:
+                    import markdown as _md
+                    html = _md.markdown(response_text)
+                except Exception:
+                    html = f"<pre>{response_text}</pre>"
+
+                # Sanitize HTML to prevent XSS before returning to the client
+                try:
+                    import bleach as _bleach
+                    allowed_tags = [
+                        'p','br','strong','em','ul','ol','li',
+                        'table','thead','tbody','tr','th','td'
+                    ]
+                    allowed_attrs = {
+                        'th': [],
+                        'td': [],
+                        'a': ['href','title'],
+                    }
+                    clean = _bleach.clean(html, tags=allowed_tags, attributes=allowed_attrs, strip=True)
+                except Exception:
+                    clean = html
+
+                return clean
             except Exception as e:
                 print(f"Error getting response message: {e}")
+                return f"(error getting response: {e})"
 
     except Exception as e:
         print(f"An error occurred posting the message: {str(e)}")
         import traceback
         traceback.print_exc()
+        return f"(exception: {e})"
 
 
 async def main() -> None:
